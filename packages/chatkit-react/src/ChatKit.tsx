@@ -1,0 +1,105 @@
+import * as React from 'react';
+import type { ChatKitControl, ToEventHandlerKey } from './useChatKit';
+import type { XpertAIChatKit, ChatKitEvents } from '@xpert-ai/chatkit';
+
+export interface ChatKitProps extends React.HTMLAttributes<XpertAIChatKit> {
+  control: ChatKitControl;
+}
+
+declare module 'react' {
+  namespace JSX {
+    interface IntrinsicElements {
+      'xpert-ai-chatkit': React.DetailedHTMLProps<
+        React.HTMLAttributes<XpertAIChatKit>,
+        XpertAIChatKit
+      >;
+    }
+  }
+}
+
+const EVENT_HANDLER_MAP: {
+  [K in keyof ChatKitEvents]: ToEventHandlerKey<K>;
+} = {
+  'chatkit.error': 'onError',
+  'chatkit.response.end': 'onResponseEnd',
+  'chatkit.response.start': 'onResponseStart',
+  'chatkit.log': 'onLog',
+  'chatkit.thread.change': 'onThreadChange',
+  'chatkit.thread.load.start': 'onThreadLoadStart',
+  'chatkit.thread.load.end': 'onThreadLoadEnd',
+  'chatkit.ready': 'onReady',
+  'chatkit.effect': 'onEffect',
+};
+
+const EVENT_NAMES = Object.keys(EVENT_HANDLER_MAP) as (keyof ChatKitEvents)[];
+
+export const ChatKit = React.forwardRef<XpertAIChatKit, ChatKitProps>(
+  function ChatKit({ control, ...htmlProps }, forwardedRef) {
+    const ref = React.useRef<XpertAIChatKit | null>(null);
+
+    React.useLayoutEffect(() => {
+      const el = ref.current;
+      if (!el) return;
+
+      // Fast path: element is already defined
+      if (customElements.get('xpert-ai-chatkit')) {
+        el.setOptions(control.options);
+        return;
+      }
+      // Fallback path: wait for definition
+      let active = true;
+      customElements.whenDefined('xpert-ai-chatkit').then(() => {
+        if (active) {
+          el.setOptions(control.options);
+        }
+      });
+      return () => {
+        active = false;
+      };
+    }, [control.options]);
+
+    React.useEffect(() => {
+      const el = ref.current;
+      if (!el) return;
+
+      const controller = new AbortController();
+      for (const eventName of EVENT_NAMES) {
+        el.addEventListener(
+          eventName,
+          (e) => {
+            const handlerName = EVENT_HANDLER_MAP[eventName];
+            const handler = control.handlers[handlerName];
+            if (typeof handler === 'function') {
+              handler(e.detail as any);
+            }
+          },
+          { signal: controller.signal },
+        );
+      }
+      return () => {
+        controller.abort();
+      };
+    }, [control.handlers]);
+
+    return (
+      <xpert-ai-chatkit
+        ref={(chatKit) => {
+          ref.current = chatKit;
+
+          control.setInstance(chatKit);
+
+          if (typeof forwardedRef === 'function') {
+            forwardedRef(chatKit);
+          } else if (forwardedRef) {
+            forwardedRef.current = chatKit;
+          }
+
+          if (!ref.current) {
+            return;
+          }
+        }}
+        {...htmlProps}
+      />
+    );
+  },
+);
